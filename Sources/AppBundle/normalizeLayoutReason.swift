@@ -1,11 +1,26 @@
+var popupDebouncer = Debouncer()
 func normalizeLayoutReason(startup: Bool) {
     for workspace in Workspace.all {
         let windows: [Window] = workspace.allLeafWindowsRecursive
         _normalizeLayoutReason(workspace: workspace, windows: windows)
     }
     _normalizeLayoutReason(workspace: focus.workspace, windows: macosMinimizedWindowsContainer.children.filterIsInstance(of: Window.self))
-    validateStillPopups(startup: startup)
+
+    if (startup) {
+        validateStillPopups(startup: startup)
+    } else {
+        // just push this to a separate function
+        popupDebouncer.debounce(delay: 0.1, action: {
+            let td = TimeoutDetector()
+            td.run(
+                task: {td in
+                    validateStillPopups(startup: startup)
+                }
+            )
+        })
+    }
 }
+
 
 private func validateStillPopups(startup: Bool) {
     for node in macosPopupWindowsContainer.children {

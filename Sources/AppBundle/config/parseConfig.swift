@@ -106,6 +106,9 @@ private let configParser: [String: any ParserProtocol<Config>] = [
     "exec-on-workspace-change": Parser(\.execOnWorkspaceChange, parseExecOnWorkspaceChange),
     "exec": Parser(\.execConfig, parseExecConfig),
 
+    "new-window-detection-debounce": Parser(\.newWindowDetectionDebounce, parseInt),
+    "new-window-detection-timeout": Parser(\.newWindowDetectionTimeout, parseInt),
+
     keyMappingConfigRootKey: Parser(\.keyMapping, skipParsing(Config().keyMapping)), // Parsed manually
     modeConfigRootKey: Parser(\.modes, skipParsing(Config().modes)), // Parsed manually
 
