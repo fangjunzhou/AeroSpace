@@ -16,9 +16,13 @@ final class MacWindow: Window, CustomStringConvertible {
 
     static var allWindowsMap: [CGWindowID: MacWindow] = [:]
     static var allWindows: [MacWindow] { Array(allWindowsMap.values) }
+    static var allWindowsLock = NSLock()
+
 
     static func get(app: MacApp, axWindow: AXUIElement, startup: Bool) -> MacWindow? {
         guard let id = axWindow.containingWindowId() else { return nil }
+        allWindowsLock.lock()
+        defer { allWindowsLock.unlock() }
         if let existing = allWindowsMap[id] {
             return existing
         } else {
@@ -37,7 +41,11 @@ final class MacWindow: Window, CustomStringConvertible {
             {
                 allWindowsMap[id] = window
                 debugWindowsIfRecording(window)
-                tryOnWindowDetected(window, startup: startup)
+                // push back to main thread if necessary
+                DispatchQueue.main.async {
+                    tryOnWindowDetected(window, startup: startup)
+                    newWindowDetected.value = true
+                }
                 return window
             } else {
                 window.garbageCollect()

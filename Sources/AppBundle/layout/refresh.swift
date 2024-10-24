@@ -1,15 +1,51 @@
 import AppKit
 import Common
 
+
+var newWindowDetected = ThreadSafeValue(false)
+
+var debouncer = Debouncer()
+
+func maybeDetectNewWindows<T>(startup: Bool, forceFocus: Bool, body: @escaping () -> T) {
+    debouncer.debounce(delay: Double(config.newWindowDetectionDebounce) / 1000, action: {
+        let td = TimeoutDetector()
+
+        td.run(
+            task: {td in
+                newWindowDetected.value = false
+                detectNewWindowsAndAttachThemToWorkspaces(startup: false)
+            },
+            onFinish: {td in
+                if td.didTimeout && newWindowDetected.value {
+                    DispatchQueue.main.async {
+                        _ = refreshSession(startup: startup, forceFocus: forceFocus, body: body)
+                    }
+                }
+            })
+
+        td.wait(timeout: Double(config.newWindowDetectionTimeout) / 1000)
+    })
+}
+
 /// It's one of the most important function of the whole application.
 /// The function is called as a feedback response on every user input.
 /// The function is idempotent.
-func refreshSession<T>(startup: Bool = false, forceFocus: Bool = false, body: () -> T) -> T {
+func refreshSession<T>(startup: Bool = false, forceFocus: Bool = false, body: @escaping () -> T) -> T {
     check(Thread.current.isMainThread)
     gc()
     gcMonitors()
 
-    detectNewWindowsAndAttachThemToWorkspaces(startup: startup)
+    if startup {
+        detectNewWindowsAndAttachThemToWorkspaces(startup: startup)
+    } else {
+        if config.newWindowDetectionTimeout > 0 {
+            maybeDetectNewWindows(startup: startup, forceFocus: forceFocus, body: body)
+        } else {
+            detectNewWindowsAndAttachThemToWorkspaces(startup: startup)
+        }
+    }
+
+
 
     let nativeFocused = getNativeFocusedWindow(startup: startup)
     if let nativeFocused { debugWindowsIfRecording(nativeFocused) }
@@ -41,6 +77,7 @@ func refreshSession<T>(startup: Bool = false, forceFocus: Bool = false, body: ()
 func refreshAndLayout(startup: Bool = false) {
     refreshSession(startup: startup, body: {})
 }
+
 
 func refreshModel() {
     gc()
