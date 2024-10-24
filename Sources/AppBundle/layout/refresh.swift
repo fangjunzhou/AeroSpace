@@ -1,10 +1,44 @@
 import AppKit
 import Common
 
+
+var newWindowDetected = ThreadSafeValue(false)
+
+var debouncer = Debouncer()
+
+func timestamp() -> String {
+    let date = Date()
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss.SSS"
+    return formatter.string(from: date)
+}
+
+func maybeDetectNewWindows<T>(_ event: RefreshSessionEvent, screenIsDefinitelyUnlocked: Bool, startup: Bool, body: @escaping () -> T) {
+    debouncer.debounce(delay: Double(config.newWindowDetectionDebounce) / 1000, action: {
+        let td = TimeoutDetector()
+
+        td.run(
+            task: {td in
+                newWindowDetected.value = false
+                detectNewWindowsAndAttachThemToWorkspaces(startup: false)
+            },
+            onFinish: {td in
+                if td.didTimeout && newWindowDetected.value {
+                    DispatchQueue.main.async {
+                        _ = refreshSession(event, screenIsDefinitelyUnlocked: screenIsDefinitelyUnlocked, startup: startup, body: body)
+                    }
+                }
+            })
+
+        td.wait(timeout: Double(config.newWindowDetectionTimeout) / 1000)
+    })
+}
+
 /// It's one of the most important function of the whole application.
 /// The function is called as a feedback response on every user input.
 /// The function is idempotent.
-func refreshSession<T>(_ event: RefreshSessionEvent, screenIsDefinitelyUnlocked: Bool, startup: Bool = false, body: () -> T) -> T {
+func refreshSession<T>(_ event: RefreshSessionEvent, screenIsDefinitelyUnlocked: Bool, startup: Bool = false, body:
+    @escaping () -> T) -> T {
     check(Thread.current.isMainThread)
     refreshSessionEventForDebug = event
     defer { refreshSessionEventForDebug = nil }
@@ -12,12 +46,24 @@ func refreshSession<T>(_ event: RefreshSessionEvent, screenIsDefinitelyUnlocked:
     gc()
     gcMonitors()
 
-    detectNewWindowsAndAttachThemToWorkspaces(startup: startup)
+
+    if startup {
+        detectNewWindowsAndAttachThemToWorkspaces(startup: startup)
+    } else {
+        if config.newWindowDetectionTimeout > 0 {
+            maybeDetectNewWindows(event, screenIsDefinitelyUnlocked: screenIsDefinitelyUnlocked, startup: startup, body: body)
+        } else {
+            detectNewWindowsAndAttachThemToWorkspaces(startup: startup)
+        }
+    }
+
+
 
     let nativeFocused = getNativeFocusedWindow(startup: startup)
     if let nativeFocused { debugWindowsIfRecording(nativeFocused) }
     updateFocusCache(nativeFocused)
     let focusBefore = focus.windowOrNil
+
 
     refreshModel()
     let result = body()
@@ -44,6 +90,7 @@ func refreshSession<T>(_ event: RefreshSessionEvent, screenIsDefinitelyUnlocked:
 func refreshAndLayout(_ event: RefreshSessionEvent, screenIsDefinitelyUnlocked: Bool, startup: Bool = false) {
     refreshSession(event, screenIsDefinitelyUnlocked: screenIsDefinitelyUnlocked, startup: startup, body: {})
 }
+
 
 func refreshModel() {
     gc()

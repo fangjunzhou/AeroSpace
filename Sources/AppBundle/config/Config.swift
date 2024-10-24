@@ -46,6 +46,9 @@ struct Config: Copyable {
     var keyMapping = KeyMapping()
     var execConfig: ExecConfig = ExecConfig()
 
+    var newWindowDetectionTimeout: Int = 0
+    var newWindowDetectionDebounce: Int = 0
+
     var onFocusChanged: [any Command] = []
     // var onFocusedWorkspaceChanged: [any Command] = []
     var onFocusedMonitorChanged: [any Command] = []

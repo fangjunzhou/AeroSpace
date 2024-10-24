@@ -16,9 +16,13 @@ final class MacWindow: Window, CustomStringConvertible {
 
     static var allWindowsMap: [CGWindowID: MacWindow] = [:]
     static var allWindows: [MacWindow] { Array(allWindowsMap.values) }
+    static var allWindowsLock = NSLock()
+
 
     static func get(app: MacApp, axWindow: AXUIElement, startup: Bool) -> MacWindow? {
         guard let id = axWindow.containingWindowId() else { return nil }
+        allWindowsLock.lock()
+        defer { allWindowsLock.unlock() }
         if let existing = allWindowsMap[id] {
             return existing
         } else {
@@ -38,7 +42,11 @@ final class MacWindow: Window, CustomStringConvertible {
                 allWindowsMap[id] = window
                 debugWindowsIfRecording(window)
                 if !restoreClosedWindowsCacheIfNeeded(newlyDetectedWindow: window) {
-                    tryOnWindowDetected(window, startup: startup)
+                    // push back to main thread if necessary
+                    DispatchQueue.main.async {
+                        tryOnWindowDetected(window, startup: startup)
+                        newWindowDetected.value = true
+                    }
                 }
                 return window
             } else {
@@ -331,12 +339,14 @@ extension UnsafeMutableRawPointer {
 }
 
 func tryOnWindowDetected(_ window: Window, startup: Bool) {
-    switch window.parent.cases {
+    switch window.parentOrNilForTests?.cases {
         case .tilingContainer, .workspace, .macosMinimizedWindowsContainer,
              .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
             onWindowDetected(window, startup: startup)
         case .macosPopupWindowsContainer:
             break
+        case nil:
+            print("Window \(window) has no parent")
     }
 }
 
