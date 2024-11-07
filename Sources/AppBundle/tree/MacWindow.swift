@@ -331,12 +331,14 @@ private func destroyedObs(_ obs: AXObserver, ax: AXUIElement, notif: CFString, d
 }
 
 func tryOnWindowDetected(_ window: Window, startup: Bool) {
-    switch window.parent.cases {
+    switch window.parentOrNilForTests?.cases {
         case .tilingContainer, .workspace, .macosMinimizedWindowsContainer,
              .macosFullscreenWindowsContainer, .macosHiddenAppsWindowsContainer:
             onWindowDetected(window, startup: startup)
         case .macosPopupWindowsContainer:
             break
+        case nil:
+            print("Window \(window) has no parent")
     }
 }
 
