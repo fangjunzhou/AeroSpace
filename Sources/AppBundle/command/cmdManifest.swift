@@ -13,13 +13,13 @@ extension CmdArgs {
             case .config:
                 command = ConfigCommand(args: self as! ConfigCmdArgs)
             case .debugWindows:
-                command = DebugWindowsCommand()
+                command = DebugWindowsCommand(args: self as! DebugWindowsCmdArgs)
             case .enable:
                 command = EnableCommand(args: self as! EnableCmdArgs)
             case .execAndForget:
                 error("exec-and-forget is parsed separately")
             case .flattenWorkspaceTree:
-                command = FlattenWorkspaceTreeCommand()
+                command = FlattenWorkspaceTreeCommand(args: self as! FlattenWorkspaceTreeCmdArgs)
             case .focus:
                 command = FocusCommand(args: self as! FocusCmdArgs)
             case .focusBackAndForth:
@@ -36,6 +36,8 @@ extension CmdArgs {
                 command = ListAppsCommand(args: self as! ListAppsCmdArgs)
             case .listExecEnvVars:
                 command = ListExecEnvVarsCommand(args: self as! ListExecEnvVarsCmdArgs)
+            case .listModes:
+                command = ListModesCommand(args: self as! ListModesCmdArgs)
             case .listMonitors:
                 command = ListMonitorsCommand(args: self as! ListMonitorsCmdArgs)
             case .listWindows:
@@ -67,7 +69,7 @@ extension CmdArgs {
             case .summonWorkspace:
                 command = SummonWorkspaceCommand(args: self as! SummonWorkspaceCmdArgs)
             case .serverVersionInternalCommand:
-                command = ServerVersionInternalCommandCommand()
+                command = ServerVersionInternalCommandCommand(args: self as! ServerVersionInternalCommandCmdArgs)
             case .triggerBinding:
                 command = TriggerBindingCommand(args: self as! TriggerBindingCmdArgs)
             case .volume:
@@ -75,7 +77,7 @@ extension CmdArgs {
             case .workspace:
                 command = WorkspaceCommand(args: self as! WorkspaceCmdArgs)
             case .workspaceBackAndForth:
-                command = WorkspaceBackAndForthCommand()
+                command = WorkspaceBackAndForthCommand(args: self as! WorkspaceBackAndForthCmdArgs)
         }
         check(command.info == Self.info)
         return command

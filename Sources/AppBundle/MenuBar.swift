@@ -2,7 +2,7 @@ import Common
 import Foundation
 import SwiftUI
 
-public func menuBar(viewModel: TrayMenuModel) -> some Scene {
+public func menuBar(viewModel: TrayMenuModel) -> some Scene { // todo should it be converted to "SwiftUI struct"?
     MenuBarExtra {
         let shortIdentification = "\(aeroSpaceAppName) v\(aeroSpaceAppVersion) \(gitShortHash)"
         let identification      = "\(aeroSpaceAppName) v\(aeroSpaceAppVersion) \(gitHash)"
@@ -51,8 +51,36 @@ public func menuBar(viewModel: TrayMenuModel) -> some Scene {
             terminateApp()
         }.keyboardShortcut("Q", modifiers: .command)
     } label: {
-        // .font(.system(.body, design: .monospaced)) doesn't work unfortunately :(
-        Text(viewModel.isEnabled ? viewModel.trayText : "⏸️")
+        if viewModel.isEnabled {
+            MonospacedText(viewModel.trayText)
+        } else {
+            MonospacedText("⏸️")
+        }
+    }
+}
+
+struct MonospacedText: View {
+    @Environment(\.colorScheme) var colorScheme: ColorScheme
+    var text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        if #available(macOS 14, *) { // https://github.com/nikitabobko/AeroSpace/issues/1122
+            let renderer = ImageRenderer(
+                content: Text(text)
+                    .font(.system(.largeTitle, design: .monospaced))
+                    .foregroundStyle(colorScheme == .light ? Color.black : Color.white)
+            )
+            if let cgImage = renderer.cgImage {
+                // Using scale: 1 results in a blurry image for unknown reasons
+                Image(cgImage, scale: 2, label: Text(text))
+            } else {
+                // In case image can't be rendered fallback to plain text
+                Text(text)
+            }
+        } else {
+            Text(text)
+        }
     }
 }
 

@@ -26,6 +26,11 @@ final class MacWindow: Window, CustomStringConvertible {
         if let existing = allWindowsMap[id] {
             return existing
         } else {
+            // Delay new window detection if mouse is down
+            // It helps with apps that allow dragging their tabs out to create new windows
+            // https://github.com/nikitabobko/AeroSpace/issues/1001
+            if isLeftMouseButtonDown { return nil }
+
             let data = getBindingDataForNewWindow(
                 axWindow,
                 startup ? (axWindow.center?.monitorApproximation ?? mainMonitor).activeWorkspace : focus.workspace,
@@ -81,16 +86,19 @@ final class MacWindow: Window, CustomStringConvertible {
             AXObserverRemoveNotification(obs.obs, obs.ax, obs.notif)
         }
         axObservers = []
-        // todo the if is an approximation to filter out cases when window just closed itself (or was killed remotely)
-        //  we might want to track the time of the latest workspace switch to make the approximation more accurate
         let focus = focus
-        if let deadWindowWorkspace, deadWindowWorkspace == focus.workspace || deadWindowWorkspace == prevFocusedWorkspace {
+        if let deadWindowWorkspace, deadWindowWorkspace == focus.workspace ||
+            deadWindowWorkspace == prevFocusedWorkspace && prevFocusedWorkspaceDate.distance(to: .now) < 1
+        {
             switch parent.cases {
                 case .tilingContainer, .workspace, .macosHiddenAppsWindowsContainer, .macosFullscreenWindowsContainer:
                     let deadWindowFocus = deadWindowWorkspace.toLiveFocus()
                     _ = setFocus(to: deadWindowFocus)
+                    // Guard against "Apple Reminders popup" bug: https://github.com/nikitabobko/AeroSpace/issues/201
                     if focus.windowOrNil?.app != app {
-                        deadWindowFocus.windowOrNil?.nativeFocus() // force focus
+                        // Force focus to fix macOS annoyance with focused apps without windows.
+                        //   https://github.com/nikitabobko/AeroSpace/issues/65
+                        deadWindowFocus.windowOrNil?.nativeFocus()
                     }
                 case .macosPopupWindowsContainer, .macosMinimizedWindowsContainer:
                     break // Don't switch back on popup destruction
@@ -214,8 +222,61 @@ final class MacWindow: Window, CustomStringConvertible {
 }
 
 /// Alternative name: !isPopup
+///
+/// Why do we need to filter out non-windows?
+/// - "floating by default" workflow
+/// - It's annoying that the focus command treats these popups as floating windows
+private func isWindowNew(_ axWindow: AXUIElement, _ app: MacApp) -> Bool {
+    // Just don't do anything with "Ghostty Quick Terminal" windows.
+    // Its position and size are managed by the Ghostty itself
+    // https://github.com/nikitabobko/AeroSpace/issues/103
+    // https://github.com/ghostty-org/ghostty/discussions/3512
+    if app.id == "com.mitchellh.ghostty" && axWindow.get(Ax.identifierAttr) == "com.mitchellh.ghostty.quickTerminal" {
+        return false
+    }
+
+    // Try to filter out incredibly weird popup like AXWindows without any buttons.
+    // E.g.
+    // - Sonoma (macOS 14) keyboard layout switch (AXSubrole == AXDialog)
+    // - IntelliJ context menu (right mouse click)
+    // - Telegram context menu (right mouse click)
+    // - Share window purple "pill" indicator https://github.com/nikitabobko/AeroSpace/issues/1101. Title is not empty
+    // - Tooltips on links mouse hover in browsers (Chrome, Firefox)
+    // - Tooltips on buttons (e.g. new tab, Extensions) mouse hover in browsers (Chrome, Firefox). Title is not empty
+    // Make sure that the following AXWindow remain windows:
+    // - macOS native file picker ("Open..." menu) (subrole == kAXDialogSubrole)
+    // - telegram image viewer (subrole == kAXFloatingWindowSubrole)
+    // - Finder preview (hit space) (subrole == "Quick Look")
+    // - Firefox non-native video fullscreen (about:config -> full-screen-api.macos-native-full-screen -> false, subrole == AXUnknown)
+    return axWindow.get(Ax.closeButtonAttr) != nil ||
+        axWindow.get(Ax.fullscreenButtonAttr) != nil ||
+        axWindow.get(Ax.zoomButtonAttr) != nil ||
+        axWindow.get(Ax.minimizeButtonAttr) != nil ||
+
+        axWindow.get(Ax.isFocused) == true ||  // 3 different ways to detect if the window is focused
+        axWindow.get(Ax.isMainAttr) == true ||
+        app.getFocusedAxWindow()?.containingWindowId() == axWindow.containingWindowId() ||
+
+        axWindow.get(Ax.subroleAttr) == kAXStandardWindowSubrole
+}
+
+/// Compatibility. Replace isWindow -> isWindowNew in 0.18.0
 func isWindow(_ axWindow: AXUIElement, _ app: MacApp) -> Bool {
     let subrole = axWindow.get(Ax.subroleAttr)
+
+    // Just don't do anything with "Ghostty Quick Terminal" windows.
+    // Its position and size are managed by the Ghostty itself
+    // https://github.com/nikitabobko/AeroSpace/issues/103
+    // https://github.com/ghostty-org/ghostty/discussions/3512
+    if app.id == "com.mitchellh.ghostty" && axWindow.get(Ax.identifierAttr) == "com.mitchellh.ghostty.quickTerminal" {
+        return false
+    }
+
+    if app.isFirefox() {
+        return isWindowNew(axWindow, app)
+    }
+
+    lazy var title = axWindow.get(Ax.titleAttr) ?? ""
 
     // Try to filter out incredibly weird popup like AXWindows without any buttons.
     // E.g.
@@ -232,7 +293,8 @@ func isWindow(_ axWindow: AXUIElement, _ app: MacApp) -> Bool {
         app.getFocusedAxWindow()?.containingWindowId() != axWindow.containingWindowId() &&
 
         subrole != kAXStandardWindowSubrole &&
-        (axWindow.get(Ax.titleAttr) ?? "").isEmpty
+        // Share window purple "pill" indicator has "Window" title https://github.com/nikitabobko/AeroSpace/issues/1101
+        (title.isEmpty || title == "Window") // Maybe it doesn't work in non-English locale
     {
         return false
     }
@@ -242,7 +304,10 @@ func isWindow(_ axWindow: AXUIElement, _ app: MacApp) -> Bool {
         app.id == "com.apple.finder" && subrole == "Quick Look" // Finder preview (hit space) is a floating window
 }
 
-func shouldFloat(_ axWindow: AXUIElement, _ app: MacApp) -> Bool { // Note: a lot of windows don't have title on startup
+// This function is referenced in the guide
+func isDialogHeuristic(_ axWindow: AXUIElement, _ app: MacApp) -> Bool {
+    // Note: a lot of windows don't have title on startup. So please don't rely on the title
+
     // Don't tile:
     // - Chrome cmd+f window ("AXUnknown" value)
     // - login screen (Yes fuck, it's also a window from Apple's API perspective) ("AXUnknown" value)
@@ -255,9 +320,11 @@ func shouldFloat(_ axWindow: AXUIElement, _ app: MacApp) -> Bool { // Note: a lo
         return true
     }
     // Firefox: Picture in Picture window doesn't have minimize button.
-    if app.id == "org.mozilla.firefox" && axWindow.get(Ax.minimizeButtonAttr)?.get(Ax.enabledAttr) != true {
+    // todo. bug: when firefox shows non-native fullscreen, minimize button is disabled for all other windows
+    if app.isFirefox() && axWindow.get(Ax.minimizeButtonAttr)?.get(Ax.enabledAttr) != true {
         return true
     }
+    if app.id == "com.apple.PhotoBooth" { return true }
     // Heuristic: float windows without fullscreen button (such windows are not designed to be big)
     // - IntelliJ various dialogs (Rebase..., Edit commit message, Settings, Project structure)
     // - Finder copy file dialog
@@ -271,12 +338,11 @@ func shouldFloat(_ axWindow: AXUIElement, _ app: MacApp) -> Bool { // Note: a lo
     // - flameshot? https://github.com/nikitabobko/AeroSpace/issues/112
     // - Drata Agent https://github.com/nikitabobko/AeroSpace/issues/134
     if !isFullscreenable(axWindow) &&
-        app.id != "com.google.Chrome" && // "Drag out" a tab out of Chrome window
         app.id != "org.gimp.gimp-2.10" && // Gimp doesn't show fullscreen button
         app.id != "com.apple.ActivityMonitor" && // Activity Monitor doesn't show fullscreen button
 
         // Terminal apps and Emacs have an option to hide their title bars
-        app.id != "org.alacritty" &&
+        app.id != "org.alacritty" && // ~/.alacritty.toml: window.decorations = "Buttonless"
         app.id != "net.kovidgoyal.kitty" && // ~/.config/kitty/kitty.conf: hide_window_decorations titlebar-and-corners
         app.id != "com.mitchellh.ghostty" && // ~/.config/ghostty/config: window-decoration = false
         app.id != "com.github.wez.wezterm" &&
@@ -310,7 +376,7 @@ private func getBindingDataForNewWindow(_ axWindow: AXUIElement, _ workspace: Wo
     if !isWindow(axWindow, app) {
         return BindingData(parent: macosPopupWindowsContainer, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
     }
-    if shouldFloat(axWindow, app) {
+    if isDialogHeuristic(axWindow, app) {
         return BindingData(parent: workspace, adaptiveWeight: WEIGHT_AUTO, index: INDEX_BIND_LAST)
     }
     return getBindingDataForNewTilingWindow(workspace)
