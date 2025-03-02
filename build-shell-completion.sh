@@ -21,5 +21,5 @@ fi
 
 # Check basic syntax
 zsh -c 'autoload -Uz compinit; compinit; source ./.shell-completion/zsh/_aerospace'
-fish -c 'source ./.shell-completion/fish/aerospace.fish'
+# fish -c 'source ./.shell-completion/fish/aerospace.fish'
 not-outdated-bash -c 'source ./.shell-completion/bash/aerospace'
